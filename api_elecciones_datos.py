@@ -339,13 +339,19 @@ def extract_mesas_pct(payload: dict) -> float:
 	return 0.0
 
 
-def _foto_for(item: dict, photos_base: str, photos_default: str, fotos_map: dict[str, str]) -> str:
+def _foto_for(item: dict, photos_base: str, photos_default: str, fotos_map: dict[str, str], missing_keys: set[str] | None = None) -> str:
 	pid = str(item.get("idAgrupacion") or item.get("id") or "").strip()
 	pname = str(item.get("nombreAgrupacion") or item.get("nombre") or "").strip()
 	key = pid or pname
 	cand = fotos_map.get(key) or fotos_map.get(pname) or fotos_map.get(pid)
 	if cand:
 		return str(Path(photos_base) / cand) if photos_base else cand
+	# Registrar faltantes
+	if missing_keys is not None:
+		if pid:
+			missing_keys.add(pid)
+		if pname:
+			missing_keys.add(pname)
 	return str(Path(photos_base) / photos_default) if photos_base and photos_default else photos_default
 
 
@@ -365,7 +371,7 @@ def get_mesas_pct_with_fallback(base_url: str, token_provider, categoria_id: int
 	return float(val or 0.0)
 
 
-def build_rows_full(res: dict, ambito: str, ambito_id: str, provincia: str, categoria_name: str, ts_iso: str, photos_base: str, photos_default: str, fotos_map: dict[str, str], base_url: str, token_provider, categoria_id: int, distrito_id: str | None) -> tuple[list[list[str]], float]:
+def build_rows_full(res: dict, ambito: str, ambito_id: str, provincia: str, categoria_name: str, ts_iso: str, photos_base: str, photos_default: str, fotos_map: dict[str, str], base_url: str, token_provider, categoria_id: int, distrito_id: str | None, missing_keys: set[str] | None = None) -> tuple[list[list[str]], float]:
 	items = (res.get("valoresTotalizadosPositivos") or []) if isinstance(res, dict) else []
 	mesas_pct = get_mesas_pct_with_fallback(base_url, token_provider, categoria_id, distrito_id, res)
 
@@ -388,7 +394,7 @@ def build_rows_full(res: dict, ambito: str, ambito_id: str, provincia: str, cate
 			pname,
 			truncate_2(pct),
 			truncate_2(mesas_pct),
-			_foto_for(it, photos_base, photos_default, fotos_map),
+			_foto_for(it, photos_base, photos_default, fotos_map, missing_keys),
 			ts_iso,
 		])
 	return rows, mesas_pct
@@ -630,6 +636,7 @@ def main() -> int:
 		errors: list[str] = []
 		ambitos_ok = 0
 
+		missing_logo_keys: set[str] = set()
 		for cid, cname in ((sen_id, "SENADORES"), (dip_id, "DIPUTADOS")):
 			if cid is None:
 				continue
@@ -657,6 +664,7 @@ def main() -> int:
 					token_provider,
 					cid,
 					None,
+					missing_logo_keys,
 				)
 				if not amb_rows:
 					errors.append(f"empty resultados nacional cid={cid}")
@@ -703,6 +711,7 @@ def main() -> int:
 						token_provider,
 						cid,
 						pba_id,
+						missing_logo_keys,
 					)
 					if not amb_rows:
 						errors.append(f"empty resultados pba cid={cid}")
@@ -752,6 +761,7 @@ def main() -> int:
 						token_provider,
 						cid,
 						did,
+						missing_logo_keys,
 					)
 					if not amb_rows:
 						errors.append(f"empty resultados prov did={did} cid={cid}")
@@ -789,6 +799,14 @@ def main() -> int:
 			warnings = _validate_rows_per_ambito(k, v)
 			for w in warnings:
 				errors.append(f"warn {w}")
+
+		# Si faltan logos, volcar lista en logs para construir fotos.json
+		if missing_logo_keys:
+			try:
+				with (logs_dir / "missing_logos.log").open("a", encoding="utf-8") as mf:
+					mf.write(f"[{cycle_ts}] faltan={sorted(missing_logo_keys)}\n")
+			except Exception:
+				pass
 
 		# Escribir CSV de forma atómica solo si hay filas
 		if rows:
