@@ -345,14 +345,27 @@ def _foto_for(item: dict, photos_base: str, photos_default: str, fotos_map: dict
 	key = pid or pname
 	cand = fotos_map.get(key) or fotos_map.get(pname) or fotos_map.get(pid)
 	if cand:
-		return str(Path(photos_base) / cand) if photos_base else cand
+		# Construir ruta absoluta si hay base configurada; si no, devolver el nombre tal cual
+		try:
+			if photos_base:
+				return str(Path(photos_base) / cand)
+			return cand
+		except Exception:
+			return cand
 	# Registrar faltantes
 	if missing_keys is not None:
 		if pid:
 			missing_keys.add(pid)
 		if pname:
 			missing_keys.add(pname)
-	return str(Path(photos_base) / photos_default) if photos_base and photos_default else photos_default
+	# Fallback: si se configuró N/A como valor especial, devolverlo literalmente
+	try:
+		if isinstance(photos_default, str) and photos_default.strip().upper() == "N/A":
+			return "N/A"
+		# Caso contrario, si hay base y archivo por defecto, construir ruta; si no, devolver literal
+		return str(Path(photos_base) / photos_default) if photos_base and photos_default else (photos_default or "N/A")
+	except Exception:
+		return "N/A"
 
 
 def get_mesas_pct_with_fallback(base_url: str, token_provider, categoria_id: int, distrito_id: str | None, res_payload: dict) -> float:
